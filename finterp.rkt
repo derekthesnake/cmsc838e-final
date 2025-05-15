@@ -19,6 +19,7 @@
 (struct Char Abs () #:transparent)
 
 (struct abs-vector (v) #:transparent)
+(struct abs-string (v) #:transparent)
 
 ;; type Answer = (list (Or Value 'err) Store)
 
@@ -32,12 +33,14 @@
 ;;            | (cons-ptr Address)
 ;;            | (box-ptr Address)
 ;;            | (vec-ptr Address)
+;;            | (str-ptr Address)
 ;;            | (Int) | (Char)
 ;; type Env = (Listof (List Id Value))
 
 (struct cons-ptr (a) #:prefab)
 (struct box-ptr (a) #:prefab)
 (struct vec-ptr (a) #:prefab)
+(struct str-ptr (a) #:prefab)
 
 ;; type Table = (Hashof Expr (Setof Answer))
 
@@ -331,8 +334,14 @@
              [(abs-vector? v)
               (list (Int) s)]))]
      
-    #;[(list 'string? v)                    (string? v)]
-    #;[(list 'string-length (? string?))    (string-length v)]
+    [(list 'string? v)                    (set (list (str-ptr? v)))]
+    [(list 'string-length (str-ptr a))
+     (for/set ([v (hash-ref s a)])
+       (cond [(string? v)
+              (list (string-length v) s)]
+             [(abs-string? v)
+              (list (Int) s)]))]
+
     [(list 'box v)
      (let ((a (if (current-abstract?)
                   e
@@ -384,8 +393,35 @@
     
     [(list 'eq? v1 v2)   (set (list (eq? v1 v2) s))]
     
-    ;[(list 'make-string (? integer?) (? char?)) ...]
-    ;[(list 'string-ref (? string?) (? integer?)) ...]    
+    [(list 'make-string (? nonnegative-integer? n) (? char? c))
+     (let ((a (if (current-abstract?)
+                  e
+                  (hash-count s))))
+       (set (list (str-ptr a)
+                  (hash-update s a
+                               (λ (vs)
+                                 (set-add vs (make-string n c)))
+                               (set (make-string n c))))))]
+    [(list 'make-string (Int) c)
+     (let ((a (if (current-abstract?)
+                  e
+                  (hash-count s))))
+       (set (list (str-ptr a)
+                  (hash-update s a
+                               (λ (vs)
+                                 (set-add vs (abs-string c)))
+                               (set (abs-string c))))))]
+    [(list 'string-ref (str-ptr a) (? nonnegative-integer? i))
+     (for/fold ([r (set)])
+               ([v (hash-ref s a)])
+       (cond [(string? v)
+              (if (< i (string-length v))
+                  (set-add r (list (string-ref v i) s))
+                  (set-add r (list 'err s)))]
+             [(abs-string? v)
+              (set-union r
+                         (set (list 'err s))
+                         (set (list (abs-string v) s)))]))]
     [(list 'cons v1 v2)
      (let ((a (if (current-abstract?)
                   e
@@ -428,7 +464,7 @@
              [(abs-vector? v)
               (set-union r
                          (set (list 'err s))
-                         (set (list (abs-vector-v v) s)))]))]
+                         (set (list (abs-vector v) s)))]))]
 
     [(list 'vector-ref (vec-ptr a) (Int))
      (for/fold ([r (set (list 'err s))])
@@ -438,7 +474,7 @@
                          (for/set ([i (vector-length v)])
                            (list (vector-ref v i) s))]
                         [(abs-vector? v)
-                         (set (list (abs-vector-v v) s))])))]
+                         (set (list (abs-vector v) s))])))]
          
     [_ (set (list 'err s))]))
 
@@ -513,7 +549,42 @@
               (set-add (set-add r (list 'err s))                       
                        (list (void)
                              (hash-set s a (set-add (hash-ref s a) (abs-vector v3)))))]))]
-       
+    [(list 'string-set! (str-ptr a) (? nonnegative-integer? i) v3)
+     (for/fold ([r (set)])
+               ([v (hash-ref s a)])
+       (cond [(string? v)
+              (if (< i (string-length v))
+                  (set-add r
+                           (list (void)
+                                 (if (current-abstract?)
+                                     (hash-set s a
+                                               (set-add (hash-ref s a)
+                                                        (string-set v i v3)))
+                                     (hash-set s a (set (string-set v i v3))))))
+                  (set-add r (list 'err s)))]
+             [(abs-string? v)
+              (set-add (set-add r (list 'err s))
+                       (list (void)
+                             (hash-set s a (set-add (hash-ref s a) (abs-string v3)))))]))]
+    [(list 'string-set! (str-ptr a) (Int) v3)
+     (for/fold ([r (set)])
+               ([v (hash-ref s a)])
+       (cond [(string? v)
+              (set-union r
+                         (set (list 'err s))
+                         (for/set ([i (string-length v)])
+                           (list (void)
+                                 (if (current-abstract?)
+                                     (hash-set s a
+                                               (set-add (hash-ref s a)
+                                                        (string-set v i v3)))
+                                     (hash-set s a (set (string-set v i v3)))))))]
+             [(abs-string? v)
+              (set-add (set-add r (list 'err s))                       
+                       (list (void)
+                             (hash-set s a (set-add (hash-ref s a) (abs-string v3)))))]))]
+
+
     [_
      (set (list 'err s))]))
 
@@ -522,7 +593,13 @@
   (let ((x (vector-copy v)))
     (begin (vector-set! x i w)
            x)))
-  
+
+;; Function variant of string-set!
+(define (string-set v i w)
+  (let ((x (string-copy v)))
+    (begin (string-set! x i w)
+           x)))
+
 ;; Any -> Boolean
 (define (codepoint? v)
   (and (integer? v)
