@@ -251,8 +251,8 @@
          (compile-e e3 c t? t)
          (Label l2))))
 
+;TODO: 'err shouldn't count as live for either branch
 (define (compile-if e1 e2 e3 c t? t)
-  (print (hash-ref t e1))
   (let ((l1 (gensym 'if))
         (l2 (gensym 'if))
         (t-dead (for/and ([entry (hash-ref t e1)])
@@ -263,8 +263,6 @@
                   (match entry
                     [(list #f _) #f]
                     [_ #t]))))
-    (print f-dead)
-    (print t-dead)
     (seq (compile-e e1 c #f t)
          ; emit comparison if neither branch is dead
          ; emit no comparison if one is dead
