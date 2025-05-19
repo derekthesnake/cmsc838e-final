@@ -120,6 +120,7 @@
        
     
 (define (lambda-exists? l t)
+ ; Check if we ever have an application for something equivalent to the lambda
   (match l
     [(Lam f xs e)
       (for/or ((e (applications t)))
@@ -138,6 +139,30 @@
 
 
 ;; Lam Table -> Asm
+(define (compile-lambda-define-old l t)
+  (let ((fvs (fv l)))
+    (match l
+      [(Lam f xs e)
+      (let ((env  (append (reverse fvs) (reverse xs) (list #f))))
+        (seq (Dq (length fvs))
+              (Label (symbol->label f))
+
+
+              (if (equal? (set (length xs))
+                          (caller-arities l t))
+                  (% "omit arity check")
+                  (seq 
+                  (% "arity check")
+                  (Cmp r15 (length xs))
+                  (Jne 'err)))
+              
+              (Mov rax (Offset rsp (* 8 (length xs))))
+              (copy-env-to-stack fvs 8)
+              (compile-e e env #t t)
+              (Add rsp (* 8 (length env))) ; pop env
+              (Ret)))]))
+)
+
 (define (compile-lambda-define l t)
   (if (lambda-exists? l t)
     (let ((fvs (fv l)))
