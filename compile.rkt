@@ -280,8 +280,11 @@
        (compile-e e3 (cons #f (cons #f c)) #f t)
        (compile-op3 p)))
 
+(define (compile-if e1 e2 e3 c t? t)
+  (compile-if-no-side-effects e1 e2 e3 c t? t))
+
 ;; Expr Expr Expr CEnv Boolean Table -> Asm
-(define (compile-if-old e1 e2 e3 c t? t)
+(define (compile-if-standard e1 e2 e3 c t? t)
   (print (hash-ref t e1))
   (let ((l1 (gensym 'if))
         (l2 (gensym 'if)))
@@ -294,17 +297,18 @@
          (compile-e e3 c t? t)
          (Label l2))))
 
-;TODO: 'err shouldn't count as live for either branch
-(define (compile-if e1 e2 e3 c t? t)
+(define (compile-if-branch-pruning e1 e2 e3 c t? t)
   (let ((l1 (gensym 'if))
         (l2 (gensym 'if))
         (t-dead (for/and ([entry (hash-ref t e1)])
                   (match entry
                     [(list #f _) #t]
+                    [(list 'err _) #t]
                     [_ #f])))
         (f-dead (for/and ([entry (hash-ref t e1)])
                   (match entry
                     [(list #f _) #f]
+                    [(list 'err _) #f]
                     [_ #t]))))
     (seq (compile-e e1 c #f t)
          ; emit comparison if neither branch is dead
@@ -323,10 +327,55 @@
              (compile-e e3 c t? t))
          (Label l2))))
 
+(define (compile-if-no-side-effects e1 e2 e3 c t? t)
+  (let* ((l1 (gensym 'if))
+        (l2 (gensym 'if))
+        (t-dead (for/and ([entry (hash-ref t e1)])
+                  (match entry
+                    [(list #f _) #t]
+                    [(list 'err _) #t]
+                    [_ #f])))
+        (f-dead (for/and ([entry (hash-ref t e1)])
+                  (match entry
+                    [(list #f _) #f]
+                    [(list 'err _) #f]
+                    [_ #t])))
+        (both-live (and (not t-dead) (not f-dead)))
+        (se (side-effects? e1)))
+    (seq (if both-live
+             ; emit comparison if either branch could be taken
+             (seq (compile-e e1 c #f t)
+                  (Cmp rax (value->bits #f))
+                  (Je l1))
+             (if se
+                 ; emit condition if it has some side effects
+                 ; no need for cmp/jump as only one branch is live
+                 (compile-e e1 c #f t)
+                 ; emit no comparison otherwise
+                 (seq)))
+         (if t-dead
+             (seq)
+             (seq (compile-e e2 c t? t)
+                  (if f-dead
+                      (seq)
+                      (Jmp l2))))
+         ; label l1 is only necessary if either branch is possible
+         (if both-live
+             (Label l1)
+             (seq))
+         (if f-dead
+             (seq)
+             (compile-e e3 c t? t))
+         (if both-live
+             (Label l2)
+             (seq)))))
+
 ;; Expr Expr CEnv Boolean Table -> Asm
 (define (compile-begin e1 e2 c t? t)
-  (seq (compile-e e1 c #f t)
-       (compile-e e2 c t? t)))
+  (seq
+   ; only emit code for the first expression if it has side effects
+   (if (side-effects? e1) (compile-e e1 c #f t) (seq))
+   (compile-e e2 c t? t)))
 
 
 ;; Id Expr Expr CEnv Boolean Table -> Asm

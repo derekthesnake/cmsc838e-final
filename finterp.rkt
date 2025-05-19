@@ -6,7 +6,8 @@
          err?
          type-integer?
          type-proc?
-         known-lambda?)
+         known-lambda?
+         side-effects?)
 (require "ast.rkt"
          "parse.rkt")
 
@@ -65,6 +66,37 @@
            (list as t1)
            (loop t1))]))
   (loop (hasheq)))
+
+;; Expr -> Bool
+(define (side-effects? e)
+  (match e
+    [(Prog _ e) (side-effects? e)]
+    [(Lit _) #f]
+    [(Eof)   #f]
+    [(Var _) #f]
+    [(Lam f xs e1) (side-effects? e1)]
+    [(App e1 es) (or (side-effects? e1) (foldl side-effects? #f (lambda (x y) (or x y))))]
+    [(Prim0 p)
+     (match p
+       ['read-byte #t]
+       ['peek-byte #f]
+       ['void #f]
+       ['collect-garbage #f])]
+    [(Prim1 p e1)
+     (match p
+       ['write-byte #t]
+       [_ (side-effects? e1)])]
+    [(Prim2 p e1 e2)
+     (or (side-effects? e1) (side-effects? e2))]
+    [(Prim3 p e1 e2 e3)
+     (match p
+       ['vector-set! #t])]
+    [(Begin e1 e2)
+     (or (side-effects? e1) (side-effects? e2))]
+    [(If e1 e2 e3)
+     (or (side-effects? e1) (side-effects? e2) (side-effects? e3))]
+    [(Let x e1 e2)
+     (or (side-effects? e1) (side-effects? e2))]))
 
 ;; Prog -> Table
 (define (analyze p)
