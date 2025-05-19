@@ -119,33 +119,51 @@
 
        
     
+(define (lambda-exists? l t)
+  (match l
+    [(Lam f xs e)
+      (for/or ((e (applications t)))
+        (match e
+          [(App e0 es)
+              (for/or ((k (hash-keys t)))
+                (for/or ((v (set->list (hash-ref t k))))
+                  (match v
+                    [(list (closure l _ _ _) _) (and (string=? (symbol->string l) (symbol->string f)) (eq? k e0))]
+                    [_ #f]
+                    )))
+              ]))]))
+              
 
     
 
 
 ;; Lam Table -> Asm
 (define (compile-lambda-define l t)
-  (let ((fvs (fv l)))
-    (match l
-      [(Lam f xs e)
-       (let ((env  (append (reverse fvs) (reverse xs) (list #f))))
-         (seq (Dq (length fvs))
-              (Label (symbol->label f))
+  (if (lambda-exists? l t)
+    (let ((fvs (fv l)))
+      (match l
+        [(Lam f xs e)
+        (let ((env  (append (reverse fvs) (reverse xs) (list #f))))
+          (seq (Dq (length fvs))
+                (Label (symbol->label f))
 
 
-              (if (equal? (set (length xs))
-                          (caller-arities l t))
-                  (% "omit arity check")
-                  (seq 
-                   (% "arity check")
-                   (Cmp r15 (length xs))
-                   (Jne 'err)))
-              
-              (Mov rax (Offset rsp (* 8 (length xs))))
-              (copy-env-to-stack fvs 8)
-              (compile-e e env #t t)
-              (Add rsp (* 8 (length env))) ; pop env
-              (Ret)))])))
+                (if (equal? (set (length xs))
+                            (caller-arities l t))
+                    (% "omit arity check")
+                    (seq 
+                    (% "arity check")
+                    (Cmp r15 (length xs))
+                    (Jne 'err)))
+                
+                (Mov rax (Offset rsp (* 8 (length xs))))
+                (copy-env-to-stack fvs 8)
+                (compile-e e env #t t)
+                (Add rsp (* 8 (length env))) ; pop env
+                (Ret)))]))
+    (seq)
+  )
+)
 
 ;; [Listof Id] Int -> Asm
 ;; Copy the closure environment at given offset to stack

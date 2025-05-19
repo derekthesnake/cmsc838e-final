@@ -1,0 +1,6 @@
+compiled
+gc.o
+*.o
+*.rkt~
+*.zo
+*.dep
