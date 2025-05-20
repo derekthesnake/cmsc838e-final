@@ -129,6 +129,7 @@
               (for/or ((k (hash-keys t)))
                 (for/or ((v (set->list (hash-ref t k))))
                   (match v
+                    ; Not sure why we have to check string equality here but otherwise it's always false
                     [(list (closure l _ _ _) _) (and (string=? (symbol->string l) (symbol->string f)) (eq? k e0))]
                     [_ #f]
                     )))
